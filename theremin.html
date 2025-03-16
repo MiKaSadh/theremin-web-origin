@@ -11,9 +11,11 @@
     <style>
         body { margin: 0; overflow: hidden; background: black; }
         canvas { display: block; }
+        #errorMsg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: red; font-size: 20px; display: none; }
     </style>
 </head>
 <body>
+    <div id="errorMsg">⚠️ カメラを取得できませんでした。設定を確認してください。</div>
     <script>
         let video;
         let detector;
@@ -24,6 +26,7 @@
         let targetVolume = 0.5, currentVolume = 0.5;
         let isStarted = false;
         let isMinor = false; // マイナーかメジャーかの判定
+        let cameraReady = false;
 
         // Cメジャースケール（スナップ用）
         const majorScale = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88];
@@ -31,9 +34,17 @@
 
         async function setup() {
             createCanvas(windowWidth, windowHeight);
-            video = createCapture(VIDEO);
-            video.size(windowWidth, windowHeight);
-            video.hide();
+            try {
+                video = createCapture(VIDEO, () => {
+                    cameraReady = true;
+                });
+                video.size(windowWidth, windowHeight);
+                video.hide();
+            } catch (error) {
+                document.getElementById("errorMsg").style.display = "block";
+                console.error("カメラの取得に失敗:", error);
+                return;
+            }
 
             filter = new p5.LowPass();
             reverb = new p5.Reverb();
@@ -65,6 +76,11 @@
 
         async function detectHands() {
             while (true) {
+                if (!cameraReady) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    continue;
+                }
+
                 const hands = await detector.estimateHands(video.elt);
                 let rightHand = hands.find(h => h.handedness === 'Right');
                 let leftHand = hands.find(h => h.handedness === 'Left');
@@ -76,7 +92,7 @@
                     let selectedScale = isMinor ? minorScale : majorScale;
 
                     for (let i = 0; i < 6; i++) {
-                        targetFreqs[i] = selectedScale[(scaleIndex + i) % selectedScale.length] * (i < 3 ? 1 : 2); // 低音・高音に分配
+                        targetFreqs[i] = selectedScale[(scaleIndex + i) % selectedScale.length] * (i < 3 ? 1 : 2);
                     }
 
                     let volumeControl = map(rightHand.keypoints[9].y, height, 0, 0, 1);
@@ -106,7 +122,9 @@
 
         function draw() {
             background(0);
-            image(video, 0, 0, width, height);
+            if (cameraReady) {
+                image(video, 0, 0, width, height);
+            }
 
             if (!isStarted) {
                 fill(255, 0, 0);
