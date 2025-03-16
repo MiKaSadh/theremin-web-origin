@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>進化したWebカメラテルミン</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/addons/p5.sound.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script>
+        let video;
+        let detector;
+        let oscs = [];
+        let filter, reverb;
+        let targetFreqs = [];
+        let currentFreqs = [];
+        let targetVolume = 0.5, currentVolume = 0.5;
+        let isStarted = false;
+        let isMinor = false; // マイナーかメジャーかの判定
+
+        // Cメジャースケール（スナップ用）
+        const majorScale = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88];
+        const minorScale = [261.63, 293.66, 311.13, 349.23, 392.00, 415.30, 466.16];
+
+        async function setup() {
+            createCanvas(windowWidth, windowHeight);
+            video = createCapture(VIDEO);
+            video.size(windowWidth, windowHeight);
+            video.hide();
+
+            filter = new p5.LowPass();
+            reverb = new p5.Reverb();
+
+            for (let i = 0; i < 6; i++) {
+                let osc = new p5.Oscillator('sine');
+                osc.disconnect();
+                osc.connect(filter);
+                reverb.process(osc, 3, 2);
+                oscs.push(osc);
+                targetFreqs.push(261.63);
+                currentFreqs.push(261.63);
+            }
+
+            detector = await handPoseDetection.createDetector(
+                handPoseDetection.SupportedModels.MediaPipeHands,
+                { runtime: 'tfjs' }
+            );
+
+            detectHands();
+        }
+
+        function mousePressed() {
+            if (!isStarted) {
+                for (let osc of oscs) osc.start();
+                isStarted = true;
+            }
+        }
+
+        async function detectHands() {
+            while (true) {
+                const hands = await detector.estimateHands(video.elt);
+                let rightHand = hands.find(h => h.handedness === 'Right');
+                let leftHand = hands.find(h => h.handedness === 'Left');
+
+                if (rightHand) {
+                    let rightHandY = rightHand.keypoints[0].y / height;
+                    let scaleIndex = floor(map(rightHandY, 1, 0, 0, majorScale.length));
+                    scaleIndex = constrain(scaleIndex, 0, majorScale.length - 1);
+                    let selectedScale = isMinor ? minorScale : majorScale;
+
+                    for (let i = 0; i < 6; i++) {
+                        targetFreqs[i] = selectedScale[(scaleIndex + i) % selectedScale.length] * (i < 3 ? 1 : 2); // 低音・高音に分配
+                    }
+
+                    let volumeControl = map(rightHand.keypoints[9].y, height, 0, 0, 1);
+                    targetVolume = constrain(volumeControl, 0, 1);
+                }
+
+                if (leftHand) {
+                    let fingerCount = countExtendedFingers(leftHand);
+                    if (fingerCount === 5) {
+                        isMinor = true; // パー → マイナーコード
+                    } else if (fingerCount === 2) {
+                        isMinor = false; // ピースサイン → メジャーコード
+                    }
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 30));
+            }
+        }
+
+        function countExtendedFingers(hand) {
+            let count = 0;
+            for (let i = 5; i <= 20; i += 4) {
+                if (hand.keypoints[i].y < hand.keypoints[0].y - 30) count++;
+            }
+            return count;
+        }
+
+        function draw() {
+            background(0);
+            image(video, 0, 0, width, height);
+
+            if (!isStarted) {
+                fill(255, 0, 0);
+                textSize(32);
+                textAlign(CENTER, CENTER);
+                text("画面をクリックしてください", width / 2, height / 2);
+                return;
+            }
+
+            for (let i = 0; i < oscs.length; i++) {
+                currentFreqs[i] = lerp(currentFreqs[i], targetFreqs[i], 0.1);
+                oscs[i].freq(currentFreqs[i]);
+                oscs[i].amp(currentVolume * 0.4);
+            }
+
+            fill(255);
+            textSize(24);
+            text(`コード: ${isMinor ? 'マイナー' : 'メジャー'}`, 20, 30);
+            text(`音量: ${currentVolume.toFixed(2)}`, 20, 60);
+        }
+    </script>
+</body>
+</html>
