@@ -29,7 +29,9 @@
         const minorChords = [[261.63, 311.13, 392.00], [293.66, 349.23, 415.30], [329.63, 392.00, 466.16]];
 
         async function setup() {
-            createCanvas(windowWidth, windowHeight);
+            let canvas = createCanvas(windowWidth, windowHeight);
+            canvas.mousePressed(startAudio);
+
             video = createCapture(VIDEO, () => { cameraReady = true; });
             video.size(windowWidth, windowHeight);
             video.hide();
@@ -57,14 +59,17 @@
             detectHands();
         }
 
-        function mousePressed() {
-            if (!isStarted) {
-                for (let osc of oscs) {
-                    osc.start();
-                    osc.amp(0);
+        function startAudio() {
+            console.log("Audio Started!");
+            userStartAudio().then(() => {
+                if (!isStarted) {
+                    for (let osc of oscs) {
+                        osc.start();
+                        ampEnv.play(osc, 0, 0.5); // 0.5秒でエンベロープ適用
+                    }
+                    isStarted = true;
                 }
-                isStarted = true;
-            }
+            });
         }
 
         async function detectHands() {
